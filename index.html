@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Camera - Avatar Sederhana</title>
+    
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_detection/face_detection.js" crossorigin="anonymous"></script>
+
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1e1e1e;
+            color: #fff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+            flex-direction: column;
+        }
+
+        /* Layar Setup Awal */
+        #setup_screen {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            background-color: #2d2d2d;
+            padding: 40px;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            text-align: center;
+        }
+
+        #setup_screen h2 { margin-top: 0; color: #58a6ff; }
+        
+        input[type="file"] { margin: 20px 0; }
+        
+        button {
+            background-color: #238636;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: 0.3s;
+        }
+        
+        button:hover { background-color: #2ea043; }
+
+        /* Layar Kamera Utama */
+        #camera_screen {
+            display: none;
+            position: relative;
+            width: 100%;
+            height: 100%;
+            justify-content: center;
+            align-items: center;
+        }
+
+        #input_video { display: none; } /* Sembunyikan video asli */
+
+        #output_canvas {
+            max-width: 100%;
+            max-height: 100%;
+            transform: scaleX(-1); /* Efek cermin */
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.8);
+        }
+
+        #loading {
+            position: absolute;
+            top: 20px;
+            background: rgba(0,0,0,0.7);
+            padding: 10px 20px;
+            border-radius: 5px;
+            color: #ffcc00;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="setup_screen">
+        <h2>Pilih Karakter Anda</h2>
+        <p>Unggah foto wajah karakter (PNG transparan lebih baik).</p>
+        <input type="file" id="image_upload" accept="image/png, image/jpeg">
+        <button id="start_btn" disabled>Mulai Kamera</button>
+    </div>
+
+    <div id="camera_screen">
+        <div id="loading">Memuat Kamera & AI...</div>
+        <video id="input_video"></video>
+        <canvas id="output_canvas" width="1280" height="720"></canvas>
+    </div>
+
+    <script>
+        // Variabel UI
+        const setupScreen = document.getElementById('setup_screen');
+        const cameraScreen = document.getElementById('camera_screen');
+        const imageUpload = document.getElementById('image_upload');
+        const startBtn = document.getElementById('start_btn');
+        const loadingElement = document.getElementById('loading');
+
+        // Variabel Canvas & Video
+        const videoElement = document.getElementById('input_video');
+        const canvasElement = document.getElementById('output_canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+
+        // Variabel Gambar Karakter
+        let characterImage = new Image();
+        let isImageLoaded = false;
+
+        // 1. Logika Upload Gambar
+        imageUpload.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(event) {
+                    characterImage.src = event.target.result;
+                    characterImage.onload = () => {
+                        isImageLoaded = true;
+                        startBtn.disabled = false;
+                        startBtn.innerText = "Mulai Kamera";
+                    }
+                }
+                reader.readAsDataURL(file);
+            }
+        });
+
+        // 2. Tombol Mulai Ditekan
+        startBtn.addEventListener('click', () => {
+            setupScreen.style.display = 'none';
+            cameraScreen.style.display = 'flex';
+            startCamera();
+        });
+
+        // 3. Logika AI Face Detection
+        function onResults(results) {
+            loadingElement.style.display = 'none';
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            
+            // Gambar tangkapan video ke canvas
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+            // Jika wajah terdeteksi dan gambar sudah diupload
+            if (results.detections.length > 0 && isImageLoaded) {
+                results.detections.forEach(detection => {
+                    const boundingBox = detection.boundingBox;
+                    
+                    // Hitung posisi dan ukuran wajah
+                    const width = boundingBox.width * canvasElement.width;
+                    const height = boundingBox.height * canvasElement.height;
+                    const x = boundingBox.xCenter * canvasElement.width - (width / 2);
+                    const y = boundingBox.yCenter * canvasElement.height - (height / 2);
+
+                    // Gambar karakter menutupi wajah (diperbesar sedikit agar menutupi kepala)
+                    const scaleFactor = 1.5;
+                    const charWidth = width * scaleFactor;
+                    const charHeight = height * scaleFactor;
+                    const charX = boundingBox.xCenter * canvasElement.width - (charWidth / 2);
+                    const charY = boundingBox.yCenter * canvasElement.height - (charHeight / 2) - (height * 0.2); // Agak ke atas
+
+                    canvasCtx.drawImage(characterImage, charX, charY, charWidth, charHeight);
+                });
+            }
+            canvasCtx.restore();
+        }
+
+        // Inisialisasi MediaPipe Face Detection
+        const faceDetection = new FaceDetection({locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/face_detection/${file}`;
+        }});
+
+        faceDetection.setOptions({
+            model: 'short', // Model cepat
+            minDetectionConfidence: 0.5
+        });
+
+        faceDetection.onResults(onResults);
+
+        // 4. Fungsi Mulai Kamera
+        function startCamera() {
+            const camera = new Camera(videoElement, {
+                onFrame: async () => {
+                    await faceDetection.send({image: videoElement});
+                },
+                width: 1280,
+                height: 720
+            });
+            camera.start();
+        }
+    </script>
+</body>
+</html>
