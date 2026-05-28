@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Camera - Hand Tracking Voice</title>
+    
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Courier New', Courier, monospace;
+            background-color: #1e1e1e;
+            color: #fff;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .container {
+            display: flex;
+            width: 100%;
+            height: 100%;
+        }
+
+        .camera-section {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: #000;
+            position: relative;
+        }
+
+        #input_video {
+            display: none; 
+        }
+
+        #output_canvas {
+            width: 100%;
+            max-width: 800px;
+            height: auto;
+            border: 2px solid #333;
+            border-radius: 10px;
+            transform: scaleX(-1); /* Efek cermin */
+        }
+
+        .log-section {
+            flex: 1;
+            background-color: #0d1117;
+            padding: 20px;
+            border-left: 2px solid #30363d;
+            overflow-y: auto;
+        }
+
+        h2 {
+            color: #58a6ff;
+            margin-top: 0;
+            border-bottom: 1px solid #30363d;
+            padding-bottom: 10px;
+        }
+
+        #log_data {
+            color: #7ee787;
+            font-size: 14px;
+            white-space: pre-wrap;
+            line-height: 1.5;
+        }
+
+        #loading {
+            position: absolute;
+            color: white;
+            font-size: 20px;
+            background: rgba(0,0,0,0.7);
+            padding: 10px 20px;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <div class="camera-section">
+            <div id="loading">Memuat Model AI Kamera... Izinkan akses webcam.</div>
+            <video id="input_video"></video>
+            <canvas id="output_canvas" width="640" height="480"></canvas>
+        </div>
+
+        <div class="log-section">
+            <h2>RyzzCV Project + Voice Control</h2>
+            <div id="log_data">Menunggu tangan terdeteksi...</div>
+        </div>
+    </div>
+
+    <script>
+        const videoElement = document.getElementById('input_video');
+        const canvasElement = document.getElementById('output_canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const logElement = document.getElementById('log_data');
+        const loadingElement = document.getElementById('loading');
+
+        // Variabel penunjang suara (cooldown agar tidak spam suara)
+        let lastSpokenText = "";
+        let lastSpokenTime = 0;
+        const SPEAK_COOLDOWN = 2000; // Jeda waktu antar suara (2 detik)
+
+        // Fungsi pembaca suara Bahasa Indonesia
+        function speak(text) {
+            const currentTime = Date.now();
+            // Cegah ngomong hal yang sama berulang-ulang terlalu cepat
+            if (text === lastSpokenText && (currentTime - lastSpokenTime) < SPEAK_COOLDOWN) {
+                return; 
+            }
+
+            // Hentikan suara yang sedang berjalan jika ada instruksi baru
+            window.speechSynthesis.cancel();
+
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = 'id-ID'; // Set bahasa Indonesia
+            utterance.rate = 1.0;     // Kecepatan normal
+            
+            utterance.onend = () => {
+                lastSpokenText = text;
+                lastSpokenTime = Date.now();
+            };
+
+            window.speechSynthesis.speak(utterance);
+        }
+
+        function onResults(results) {
+            loadingElement.style.display = 'none';
+
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                let logText = "";
+                
+                for (let i = 0; i < results.multiHandLandmarks.length; i++) {
+                    const landmarks = results.multiHandLandmarks[i];
+                    
+                    // Gambar visualisasi tangan
+                    drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#FFFFFF', lineWidth: 4});
+                    drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 2, radius: 5});
+
+                    // Logika Deteksi Jari Terbuka (True / False)
+                    // Menggunakan titik koordinat standar MediaPipe Hands
+                    const thumbOpen = landmarks[4].x < landmarks[3].x; // Jempol (disesuaikan untuk efek cermin)
+                    const indexOpen = landmarks[8].y < landmarks[6].y; // Telunjuk
+                    const middleOpen = landmarks[12].y < landmarks[10].y; // Jari Tengah
+                    const ringOpen = landmarks[16].y < landmarks[14].y; // Jari Manis
+                    const pinkyOpen = landmarks[20].y < landmarks[18].y; // Kelingking
+
+                    let gestureDetected = "Tidak ada gesture khusus";
+
+                    // LOGIKA PERINTAH SUARA:
+                    // 1. Jari Telunjuk + Jempol Aktif (Jari lain tertutup)
+                    if (indexOpen && thumbOpen && !middleOpen && !ringOpen && !pinkyOpen) {
+                        gestureDetected = "Telunjuk + Jempol (Panggil Nama)";
+                        speak("Fathur Rizam");
+                    }
+                    // 2. Hanya Jari Telunjuk Aktif
+                    else if (indexOpen && !thumbOpen && !middleOpen && !ringOpen && !pinkyOpen) {
+                        gestureDetected = "Jari Telunjuk (Halo)";
+                        speak("Halo");
+                    }
+                    // 3. Hanya Jari Tengah Aktif
+                    else if (middleOpen && !thumbOpen && !indexOpen && !ringOpen && !pinkyOpen) {
+                        gestureDetected = "Jari Tengah (Fathur Rizam)";
+                        speak("Fathur Rizam");
+                    }
+
+                    // Tampilkan Informasi di Panel Kanan
+                    logText += `[ TANGAN KE-${i + 1} TERDETEKSI ]\n`;
+                    logText += `> Gesture: ${gestureDetected}\n`;
+                    logText += `> Status Jari:\n`;
+                    logText += `  - Jempol      : ${thumbOpen ? "✓ TERBUKA" : "✗ TERTUTUP"}\n`;
+                    logText += `  - Telunjuk    : ${indexOpen ? "✓ TERBUKA" : "✗ TERTUTUP"}\n`;
+                    logText += `  - Jari Tengah : ${middleOpen ? "✓ TERBUKA" : "✗ TERTUTUP"}\n`;
+                    logText += `  - Jari Manis  : ${ringOpen ? "✓ TERBUKA" : "✗ TERTUTUP"}\n`;
+                    logText += `  - Kelingking  : ${pinkyOpen ? "✓ TERBUKA" : "✗ TERTUTUP"}\n\n`;
+                }
+                
+                logElement.innerText = logText;
+            } else {
+                logElement.innerText = "> Tidak ada pergerakan tangan yang terdeteksi.\n> Menunggu input...";
+            }
+            canvasCtx.restore();
+        }
+
+        // Konfigurasi MediaPipe Hands
+        const hands = new Hands({locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+        }});
+        
+        hands.setOptions({
+            maxNumHands: 1, // Diubah ke 1 agar fokus pada satu komando utama
+            modelComplexity: 1,
+            minDetectionConfidence: 0.7, // Ditingkatkan ke 0.7 agar pembacaan jari lebih akurat
+            minTrackingConfidence: 0.7
+        });
+        
+        hands.onResults(onResults);
+
+        // Memulai Kamera
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await hands.send({image: videoElement});
+            },
+            width: 640,
+            height: 480
+        });
+        
+        camera.start();
+    </script>
+</body>
+</html>
