@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Camera - Hand Tracking & Voice</title>
+    
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: 'Courier New', Courier, monospace;
+            background-color: #1e1e1e;
+            color: #fff;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .container {
+            display: flex;
+            width: 100%;
+            height: 100%;
+        }
+
+        .camera-section {
+            flex: 1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: #000;
+            position: relative;
+        }
+
+        #input_video {
+            display: none; 
+        }
+
+        #output_canvas {
+            width: 100%;
+            max-width: 800px;
+            height: auto;
+            border: 2px solid #333;
+            border-radius: 10px;
+            transform: scaleX(-1);
+        }
+
+        .log-section {
+            flex: 1;
+            background-color: #0d1117;
+            padding: 20px;
+            border-left: 2px solid #30363d;
+            overflow-y: auto;
+        }
+
+        h2 {
+            color: #58a6ff;
+            margin-top: 0;
+            border-bottom: 1px solid #30363d;
+            padding-bottom: 10px;
+        }
+
+        #log_data {
+            color: #7ee787;
+            font-size: 14px;
+            white-space: pre-wrap;
+            line-height: 1.5;
+        }
+
+        #loading {
+            position: absolute;
+            color: white;
+            font-size: 20px;
+            background: rgba(0,0,0,0.7);
+            padding: 10px 20px;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <div class="camera-section">
+            <div id="loading">Memuat Model AI Kamera... Izinkan akses webcam.</div>
+            <video id="input_video"></video>
+            <canvas id="output_canvas" width="640" height="480"></canvas>
+        </div>
+
+        <div class="log-section">
+            <h2>RyzzCV Project</h2>
+            <div id="log_data">Menunggu tangan terdeteksi...</div>
+        </div>
+    </div>
+
+    <script>
+        const videoElement = document.getElementById('input_video');
+        const canvasElement = document.getElementById('output_canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const logElement = document.getElementById('log_data');
+        const loadingElement = document.getElementById('loading');
+
+        let lastDetectedGesture = "Tidak ada gesture khusus";
+        
+        let availableVoices = [];
+        window.speechSynthesis.onvoiceschanged = () => {
+            availableVoices = window.speechSynthesis.getVoices();
+        };
+
+        function speak(text) {
+            if (!text) return;
+            
+            window.speechSynthesis.cancel();
+
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.lang = 'id-ID'; 
+            
+            utterance.rate = 0.85;  
+            utterance.pitch = 1.2;  
+
+            if (availableVoices.length > 0) {
+                let idVoice = availableVoices.find(v => v.lang === 'id-ID' && (v.name.includes('Google') || v.name.toLowerCase().includes('female')));
+                if (!idVoice) {
+                    idVoice = availableVoices.find(v => v.lang === 'id-ID'); 
+                }
+                if (idVoice) utterance.voice = idVoice;
+            }
+
+            window.speechSynthesis.speak(utterance);
+        }
+
+        function onResults(results) {
+            loadingElement.style.display = 'none';
+
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                let logText = "";
+                
+                for (let i = 0; i < results.multiHandLandmarks.length; i++) {
+                    const landmarks = results.multiHandLandmarks[i];
+                    
+                    drawConnectors(canvasCtx, landmarks, HAND_CONNECTIONS, {color: '#FFFFFF', lineWidth: 4});
+                    drawLandmarks(canvasCtx, landmarks, {color: '#FF0000', lineWidth: 2, radius: 5});
+
+                    const jempolTerbuka = landmarks[4].x < landmarks[3].x;
+                    const telunjukTerbuka = landmarks[8].y < landmarks[6].y;
+                    const tengahTerbuka = landmarks[12].y < landmarks[10].y;
+                    const manisTerbuka = landmarks[16].y < landmarks[14].y;
+                    const kelingkingTerbuka = landmarks[20].y < landmarks[18].y;
+
+                    let currentGesture = "Tidak ada gesture khusus";
+                    let textToSpeak = "";
+
+                    // LOGIKA BARU SESUAI PERMINTAAN
+                    
+                    // 1. Jempol Saja -> "halo"
+                    if (jempolTerbuka && !telunjukTerbuka && !tengahTerbuka && !manisTerbuka && !kelingkingTerbuka) {
+                        currentGesture = "Jempol Saja";
+                        textToSpeak = "halo";
+                    } 
+                    // 2. Telunjuk Saja -> "nama saya Fathur Rizam"
+                    else if (!jempolTerbuka && telunjukTerbuka && !tengahTerbuka && !manisTerbuka && !kelingkingTerbuka) {
+                        currentGesture = "Telunjuk Saja";
+                        textToSpeak = "nama saya Fathur Rizam";
+                    }
+                    // 3. Kelingking Saja -> "saya suka banget"
+                    else if (!jempolTerbuka && !telunjukTerbuka && !tengahTerbuka && !manisTerbuka && kelingkingTerbuka) {
+                        currentGesture = "Kelingking Saja";
+                        textToSpeak = "saya suka banget";
+                    }
+                    // 4. Telunjuk dan Jari Tengah -> "tentang teknologi"
+                    else if (!jempolTerbuka && telunjukTerbuka && tengahTerbuka && !manisTerbuka && !kelingkingTerbuka) {
+                        currentGesture = "Telunjuk & Tengah (Peace)";
+                        textToSpeak = "tentang teknologi";
+                    }
+                    // 5. Semua Jari Terbuka -> "terima kasih"
+                    else if (jempolTerbuka && telunjukTerbuka && tengahTerbuka && manisTerbuka && kelingkingTerbuka) {
+                        currentGesture = "Semua Jari Terbuka";
+                        textToSpeak = "terima kasih";
+                    }
+
+                    if (currentGesture !== lastDetectedGesture) {
+                        if (textToSpeak !== "") {
+                            speak(textToSpeak);
+                        }
+                        lastDetectedGesture = currentGesture;
+                    }
+
+                    logText += `[ TANGAN KE-${i + 1} TERDETEKSI ]\n`;
+                    logText += `> Status     : AKTIF\n`;
+                    logText += `> Gesture    : ${currentGesture}\n`;
+                    logText += `> Detail Jari:\n`;
+                    logText += `   - Jempol    : ${jempolTerbuka ? "ANGKAT" : "TEKUK"}\n`;
+                    logText += `   - Telunjuk  : ${telunjukTerbuka ? "ANGKAT" : "TEKUK"}\n`;
+                    logText += `   - Tengah    : ${tengahTerbuka ? "ANGKAT" : "TEKUK"}\n`;
+                    logText += `   - Manis     : ${manisTerbuka ? "ANGKAT" : "TEKUK"}\n`;
+                    logText += `   - Kelingking: ${kelingkingTerbuka ? "ANGKAT" : "TEKUK"}\n`;
+                    logText += `\n`;
+                }
+                
+                logElement.innerText = logText;
+            } else {
+                logElement.innerText = "> Tidak ada pergerakan tangan yang terdeteksi.\n> Menunggu input...";
+                
+                lastDetectedGesture = "Tidak ada gesture khusus"; 
+            }
+            canvasCtx.restore();
+        }
+
+        const hands = new Hands({locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`;
+        }});
+        
+        hands.setOptions({
+            maxNumHands: 1, 
+            modelComplexity: 1,
+            minDetectionConfidence: 0.7, 
+            minTrackingConfidence: 0.7
+        });
+        
+        hands.onResults(onResults);
+
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await hands.send({image: videoElement});
+            },
+            width: 640,
+            height: 480
+        });
+        
+        camera.start();
+    </script>
+</body>
+</html>
